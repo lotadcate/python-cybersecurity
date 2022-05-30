@@ -1,5 +1,5 @@
 import argparse
-import locate
+import locale
 import os
 import socket
 import shlex
@@ -16,7 +16,7 @@ def execute(cmd):
 		return
 
 	# built-in command available
-	if os.name = "nt":
+	if os.name == "nt":
 		shell = True
 	else:
 		shell = False
@@ -24,14 +24,14 @@ def execute(cmd):
 	# this enables us to execute commands on local os
 	output = subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT, shell=shell)
 
-	if locale.getdefaultlocale() == {'ja_JP', 'cp932'}:
+	if locale.getdefaultlocale() == ('ja_JP', 'cp932'):
 		return output.decode('cp932')
 	else:
 		return output.decode()
 
 # send and receive packets
 class NetCat:
-	def __init__(self):
+	def __init__(self, args, buffer=None):
 		self.args = args
 		self.buffer = buffer
 		self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -64,13 +64,17 @@ class NetCat:
 					# get input interactivly, dialogicly
 					if response:
 						print(response)
-						buffer = input("> ")
+						buffer = input('> ')
 						buffer += '\n'
-						self.socket.sen(buffer.encode())
+						self.socket.send(buffer.encode())
 		except KeyboardInterrupt:
 			print('User terminated')
 			self.socket.close()
 			sys.exit()
+
+		except EOFError as e:
+			print(e)
+
 
 	# acting like server
 	def listen(self):
@@ -81,13 +85,50 @@ class NetCat:
 			client_thread = threading.Thread(target=self.handle, args=(client_socket, ))
 			client_thread.start()
 
+	def handle(self, client_socket):
+		if self.args.execute:
+			output = execute(self.args.execute)
+			client_socket.send(output.encode())
+
+		elif self.args.upload:
+			file_buffer = b''
+			while True:
+				data = client_socket.recv(4096)
+				if data:
+					file_buffer += data
+				else:
+					break
+			with open(self.args.upload,'wb') as f:
+				f.write(file_buffer)
+			message = f'Saved file {self.args.upload}'
+			client_socket.send(message.encode())
+
+		elif self.args.command:
+			cmd_buffer = b''
+			while True:
+				try:
+					client_socket.send(b'<BHP:#>')
+					while '\n' not in cmd_buffer.decode():
+						cmd_buffer += client_socket.recv(64)
+					response = execute(cmd_buffer.decode())
+
+					if response:
+						client_socket.send(response.encode())
+
+					cmd_buffer = b''
+
+				except Exception as e:
+					print(f'server killed {e}')
+					self.socket.close()
+					sys.exit()
+
 
 
 if __name__ == '__main__':
 	# make CLI using argparse
 	parser = argparse.ArgumentParser(
-		description = "BHP Net Tool",
-		formatter_class = argparse.RawDescriptionHelpHormatter,
+		description = 'BHP Net Tool',
+		formatter_class = argparse.RawDescriptionHelpFormatter,
 		epilog = textwrap.dedent(
 			'''
 			# shell init
